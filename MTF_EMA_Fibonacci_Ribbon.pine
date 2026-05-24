@@ -1,0 +1,133 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Cipher_SMC
+
+//@version=6
+indicator("MTF EMA Fibonacci Ribbon Dashboard [Cipher_SMC]", "MTF EMA Fib Ribbon [Cipher_SMC]", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// --- Constants ---
+const int LEN1 = 8
+const int LEN2 = 13
+const int LEN3 = 21
+const int LEN4 = 34
+const int LEN5 = 55
+
+const color BULL_COLOR = #089981
+const color BEAR_COLOR = #f23645
+const color NEUT_COLOR = #5b9cf6
+
+// --- Inputs ---
+groupMTF = "Multi-Timeframe Layers"
+tfBias   = input.timeframe("240", "Bias Trend (Anchor)", tooltip = "Suggested: 4H", group = groupMTF)
+tfHTF    = input.timeframe("60",  "HTF Trend (Structure)", tooltip = "Suggested: 1H", group = groupMTF)
+
+groupSmoothing = "Smoothing Settings"
+smoothingType  = input.string("EMA", "Algorithm", options = ["EMA", "Zero-Lag EMA", "Gaussian"], group = groupSmoothing)
+lagMagnitude   = input.float(0.5, "Lag Reduction", minval = 0, maxval = 1, step = 0.1, group = groupSmoothing)
+
+groupVisuals = "Dashboard & Style"
+showTable    = input.bool(true, "Show MTF Dashboard", group = groupVisuals)
+ribbonTransp = input.int(80, "Base Transparency", minval = 0, maxval = 100, group = groupVisuals)
+showSqz      = input.bool(true, "Squeeze Marker", group = groupVisuals)
+showHeat     = input.bool(true, "Momentum Heat", group = groupVisuals)
+
+// --- User Defined Functions ---
+method zlema(float src, int length, float lagMult) =>
+    int lag = int(math.floor((length - 1) / 2) * lagMult)
+    float data = src + (src - nz(src[lag]))
+    ta.ema(data, length)
+
+method gaussian(float src, int length) =>
+    float beta  = (1 - math.cos(2 * math.pi / length)) / (math.pow(math.sqrt(2), 2.0 / 2.0) - 1)
+    float alpha = -beta + math.sqrt(math.pow(beta, 2) + 2 * beta)
+    float c0    = math.pow(alpha, 2)
+    float a1    = 2 * (1 - alpha)
+    float a2    = -math.pow(1 - alpha, 2)
+    float res   = 0.0
+    res := c0 * src + a1 * nz(res[1]) + a2 * nz(res[2])
+    res
+
+getMA(float src, int length, string sType, float lMag) =>
+    switch sType
+        "EMA"          => ta.ema(src, length)
+        "Zero-Lag EMA" => src.zlema(length, lMag)
+        "Gaussian"     => src.gaussian(length)
+        => ta.ema(src, length)
+
+// Calculation function for MTF requests
+calcRibbon() =>
+    float m1 = getMA(close, LEN1, smoothingType, lagMagnitude)
+    float m2 = getMA(close, LEN2, smoothingType, lagMagnitude)
+    float m3 = getMA(close, LEN3, smoothingType, lagMagnitude)
+    float m4 = getMA(close, LEN4, smoothingType, lagMagnitude)
+    float m5 = getMA(close, LEN5, smoothingType, lagMagnitude)
+    
+    bool bull = m1 > m2 and m2 > m3 and m3 > m4 and m4 > m5
+    bool bear = m1 < m2 and m2 < m3 and m3 < m4 and m4 < m5
+    
+    float mean = (m1 + m2 + m3 + m4 + m5) / 5
+    float std  = math.sqrt((math.pow(m1-mean, 2) + math.pow(m2-mean, 2) + math.pow(m3-mean, 2) + math.pow(m4-mean, 2) + math.pow(m5-mean, 2)) / 5)
+    float disp = std / mean
+    float dThr = ta.percentile_linear_interpolation(disp, 100, 20)
+    bool sqz   = disp < dThr
+    
+    [m1, m2, m3, m4, m5, bull, bear, sqz]
+
+// --- Core Logic ---
+// 1. Current Timeframe (LTF/Entry)
+[ma1, ma2, ma3, ma4, ma5, isBull, isBear, isSqz] = calcRibbon()
+
+// 2. MTF Requests
+[ma1HTF, ma2HTF, ma3HTF, ma4HTF, ma5HTF, isBullHTF, isBearHTF, isSqzHTF] = request.security(syminfo.tickerid, tfHTF, calcRibbon(), gaps = barmerge.gaps_off)
+[ma1Bias, ma2Bias, ma3Bias, ma4Bias, ma5Bias, isBullBias, isBearBias, isSqzBias] = request.security(syminfo.tickerid, tfBias, calcRibbon(), gaps = barmerge.gaps_off)
+
+// 3. Confluence Logic
+bool totalConfluenceBull = isBullBias and isBullHTF and isBull
+bool totalConfluenceBear = isBearBias and isBearHTF and isBear
+
+// Momentum Logic
+float slope8 = (ma1 - nz(ma1[1])) / nz(ma1[1])
+bool highMom = math.abs(slope8) > ta.stdev(slope8, 50)
+
+// --- Visuals ---
+// Current Ribbon Plots
+color trendColor = isBull ? BULL_COLOR : isBear ? BEAR_COLOR : NEUT_COLOR
+p1 = plot(ma1, "EMA 8",  color = color.new(trendColor, 0),  linewidth = 2)
+p2 = plot(ma2, "EMA 13", color = color.new(trendColor, 15))
+p3 = plot(ma3, "EMA 21", color = color.new(trendColor, 30))
+p4 = plot(ma4, "EMA 34", color = color.new(trendColor, 45))
+p5 = plot(ma5, "EMA 55", color = color.new(trendColor, 60), linewidth = 2)
+
+fill(p1, p2, color.new(trendColor, ribbonTransp + 0),  "Layer 1")
+fill(p2, p3, color.new(trendColor, ribbonTransp + 5),  "Layer 2")
+fill(p3, p4, color.new(trendColor, ribbonTransp + 10), "Layer 3")
+fill(p4, p5, color.new(trendColor, ribbonTransp + 15), "Layer 4")
+
+// Squeeze Marker (Bottom)
+plotshape(showSqz and isSqz, "Squeeze Marker", shape.circle, location.bottom, NEUT_COLOR, size = size.tiny)
+
+// Momentum Heat (Absolute - Fixed by providing Y-coordinate)
+plotshape(showHeat and highMom ? ma1 : na, "Momentum Heat", shape.circle, location.absolute, color.new(slope8 > 0 ? BULL_COLOR : BEAR_COLOR, 50), size = size.tiny)
+
+// Dashboard Table
+var table dashboard = table.new(position.top_right, 4, 2, bgcolor = #131722, border_color = #363a45, border_width = 1)
+if barstate.islast and showTable
+    table.cell(dashboard, 0, 0, "Timeframe", text_color = chart.fg_color)
+    table.cell(dashboard, 1, 0, "Bias (4H)",  text_color = chart.fg_color)
+    table.cell(dashboard, 2, 0, "HTF (1H)",   text_color = chart.fg_color)
+    table.cell(dashboard, 3, 0, "LTF (Chart)",text_color = chart.fg_color)
+    
+    table.cell(dashboard, 0, 1, "Status", text_color = chart.fg_color)
+    table.cell(dashboard, 1, 1, isBullBias ? "BULL" : isBearBias ? "BEAR" : "NEUT", bgcolor = isBullBias ? BULL_COLOR : isBearBias ? BEAR_COLOR : NEUT_COLOR)
+    table.cell(dashboard, 2, 1, isBullHTF ? "BULL" : isBearHTF ? "BEAR" : "NEUT",   bgcolor = isBullHTF ? BULL_COLOR : isBearHTF ? BEAR_COLOR : NEUT_COLOR)
+    table.cell(dashboard, 3, 1, isBull ? "BULL" : isBear ? "BEAR" : "NEUT",         bgcolor = isBull ? BULL_COLOR : isBear ? BEAR_COLOR : NEUT_COLOR)
+
+// Confluence Highlights
+bgcolor(totalConfluenceBull ? color.new(BULL_COLOR, 85) : totalConfluenceBear ? color.new(BEAR_COLOR, 85) : na)
+
+// Entry Signals (Triangles)
+plotshape(totalConfluenceBull and highMom and not highMom[1], "Entry Bull", shape.triangleup, location.belowbar, BULL_COLOR, size = size.small)
+plotshape(totalConfluenceBear and highMom and not highMom[1], "Entry Bear", shape.triangledown, location.abovebar, BEAR_COLOR, size = size.small)
+
+// --- Alerts ---
+alertcondition(totalConfluenceBull and not totalConfluenceBull[1], "Full Bullish Confluence", "4H, 1H, and LTF are all aligned BULL.")
+alertcondition(totalConfluenceBear and not totalConfluenceBear[1], "Full Bearish Confluence", "4H, 1H, and LTF are all aligned BEAR.")
