@@ -23,7 +23,7 @@ Look at the **Dashboard**.
 
 #### Step 2: Identify the Setup (LTF Pullback or Squeeze)
 On your 5M or 15M chart, wait for one of two things:
-*   **The Pullback**: Price drops into the "Value Zone" (the middle of the ribbon) while the 4H/1H are still trending.
+*   **The Pullback**: Price drops into the "[Value Zone](https://github.com/CipherSMC/MTF_EMA_Fibonacci_Ribbon/blob/main/Value_Zone.md)" (the middle of the ribbon) while the 4H/1H are still trending.
 *   **The Squeeze**: Look for the **Blue Squeeze Markers** at the bottom. This means the market is resting before the next leg of the trend.
 
 #### Step 3: Wait for Confluence (The Signal)
